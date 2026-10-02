@@ -190,6 +190,10 @@ struct StatusPopoverView: View {
             }
             Button("Open History", action: onHistory)
             Button("Open Settings", action: onSettings)
+            Divider()
+            Button("Quit PingScope") {
+                NSApp.terminate(nil)
+            }
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .semibold))
