@@ -37,7 +37,9 @@ struct StatusPopoverView: View {
                         )
                     }
                     if presentation.popoverShowsAllHosts {
-                        allHostStatusSummary
+                        allHostStatusSummary(
+                            rowWidth: viewport.size.width - 2 * MenuBarPresentationMode.statusContentPadding
+                        )
                     }
                     // Spare height goes to sample rows first; once every row is
                     // showing, the graph takes the rest.
@@ -529,13 +531,14 @@ struct StatusPopoverView: View {
         }
     }
 
-    private var allHostStatusSummary: some View {
+    private func allHostStatusSummary(rowWidth: CGFloat) -> some View {
         let presentation = viewModel.presentation
         return VStack(spacing: 0) {
             ForEach(Array(presentation.displayPresentation.hostStatusSummaries.enumerated()), id: \.element.id) { index, summary in
                 AllHostStatusRow(
                     summary: summary,
-                    graphSeries: presentation.displayPresentation.allHostGraphSeries.first { $0.id == summary.id }
+                    graphSeries: presentation.displayPresentation.allHostGraphSeries.first { $0.id == summary.id },
+                    sparklineWidth: AllHostStatusRow.sparklineWidth(rowWidth: rowWidth)
                 )
                 if index < presentation.displayPresentation.hostStatusSummaries.count - 1 {
                     Divider()

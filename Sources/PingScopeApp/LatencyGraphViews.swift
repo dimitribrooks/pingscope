@@ -8,6 +8,9 @@ enum RecentSamplesLayout {
     static let headerHeight: CGFloat = 24
     static let rowHeight: CGFloat = 22
     static let minimumVisibleRows = 3
+    /// Samples arrive seconds apart, so a time without seconds reads the same
+    /// on every row.
+    static let timeFormat = Date.FormatStyle(date: .omitted, time: .standard)
 
     /// Row slots to lay out for `availableHeight` (nil when the parent asks
     /// for the ideal size). Never fewer than `minimumVisibleRows`, so the list
@@ -88,7 +91,7 @@ struct RecentSamplesView: View {
 
     private func row(_ result: PingResult) -> some View {
         columns {
-            Text(result.timestamp, style: .time)
+            Text(result.timestamp, format: RecentSamplesLayout.timeFormat)
             if let latency = result.latency {
                 Text("\(Int(latency.milliseconds.rounded()))ms")
             } else {
