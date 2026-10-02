@@ -42,6 +42,18 @@ enum MenuBarPresentationMode {
         return now - lastWillClose < popoverReopenSuppressionInterval
     }
 
+    /// Opening the popover takes focus from the app the user was in. Hand it
+    /// back when they put the popover away themselves and nothing else of ours
+    /// is up. After an outside click the system has already moved focus to
+    /// whatever was clicked, and reactivating the old app would fight that.
+    static func shouldReturnFocusAfterPopoverCloses(
+        appIsActive: Bool,
+        hasOtherVisibleWindow: Bool,
+        closedByOutsideClick: Bool
+    ) -> Bool {
+        appIsActive && !hasOtherVisibleWindow && !closedByOutsideClick
+    }
+
     /// Control-click is the left button, so it arrives through the status
     /// button's action rather than the right-click gesture.
     static func isControlClick(type: NSEvent.EventType?, modifierFlags: NSEvent.ModifierFlags) -> Bool {

@@ -45,7 +45,7 @@ struct PingScopeApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static weak var shared: AppDelegate?
 
     let model = PingScopeModel()
@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var statusPopoverViewModel = StatusPopoverPresentationViewModel(model: model)
     private var statusItem: NSStatusItem?
     private var statusItemView: MenuBarStatusView?
-    private var popover: NSPopover?
+    private lazy var statusPopover = makeStatusPopoverController()
     private var detachedPopoverWindow: NSWindow?
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
@@ -68,7 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var cadenceUpdateTask: Task<Void, Never>?
     private var pendingCadenceInputs: CadenceInputs?
     private var isPresentationRefreshDeferred = false
-    private var lastPopoverWillCloseUptime: TimeInterval?
     private var hostRowCountObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -271,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applyWindowOpacity() {
         let alpha = CGFloat(model.overlayOpacity)
         overlayController?.window?.alphaValue = alpha
-        popover?.contentViewController?.view.window?.alphaValue = alpha
+        statusPopover.window?.alphaValue = alpha
         DebugLog.write("window opacity applied value=\(model.overlayOpacity)")
     }
 
@@ -370,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if overlayController?.window?.isVisible == true {
             overlayViewModel.refresh()
         }
-        if popover?.isShown == true || detachedPopoverWindow?.isVisible == true {
+        if statusPopover.isShown || detachedPopoverWindow?.isVisible == true {
             statusPopoverViewModel.refresh()
         }
     }
@@ -444,23 +443,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
 
-        if let popover, popover.isShown {
-            // A popover left behind on another Space still reports isShown;
-            // closing it would look like a swallowed click, so bring it here.
-            let isOnActiveSpace = popover.contentViewController?.view.window?.isOnActiveSpace ?? true
-            DebugLog.write("status item click closes popover onActiveSpace=\(isOnActiveSpace)")
-            popover.performClose(nil)
-            if isOnActiveSpace { return }
-        } else if MenuBarPresentationMode.shouldSuppressPopoverReopen(
-            now: ProcessInfo.processInfo.systemUptime,
-            lastWillClose: lastPopoverWillCloseUptime
-        ) {
-            DebugLog.write("status item click already dismissed the popover")
-            return
-        }
-
-        DebugLog.write("status item click opens popover")
-        showPopoverFromStatusItem()
+        statusPopover.toggle(relativeTo: anchorView)
     }
 
     private func showPopoverFromStatusItem() {
@@ -492,7 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func openSettingsFromStatusContent() {
-        popover?.performClose(nil)
+        statusPopover.close()
         if detachedPopoverWindow?.isVisible == true {
             detachedPopoverWindow?.close()
         }
@@ -500,7 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func openHistoryFromStatusContent() {
-        popover?.performClose(nil)
+        statusPopover.close()
         if detachedPopoverWindow?.isVisible == true {
             detachedPopoverWindow?.close()
         }
@@ -508,19 +491,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func showPopover(relativeTo anchorView: NSView) {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = preferredStatusContentSize(on: anchorView.window?.screen)
-        popover.contentViewController = makeStatusContentController()
-        popover.delegate = self
-        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
-        self.popover = popover
-        updatePowerMonitorUIVisibility()
-        applyWindowOpacity()
-        DispatchQueue.main.async { [weak self, weak popover] in
-            guard self?.popover === popover else { return }
-            self?.applyWindowOpacity()
+        statusPopover.show(relativeTo: anchorView)
+    }
+
+    private func makeStatusPopoverController() -> StatusPopoverController {
+        let controller = StatusPopoverController(
+            makeContent: { [unowned self] in makeStatusContentController() },
+            contentSize: { [unowned self] screen in preferredStatusContentSize(on: screen) }
+        )
+        controller.hasOtherVisibleWindow = { [unowned self] in hasVisiblePrimaryWindow }
+        controller.makeDetachedWindow = { [unowned self] in
+            let window = makeDetachedStatusWindow()
+            detachedPopoverWindow = window
+            return window
         }
+        controller.onVisibilityChange = { [unowned self] in
+            updatePowerMonitorUIVisibility()
+            applyWindowOpacity()
+            // The popover's window only exists once the show has gone through.
+            DispatchQueue.main.async { [weak self] in
+                self?.applyWindowOpacity()
+            }
+        }
+        return controller
     }
 
     /// Refreshes first: the view model is not kept current while hidden.
@@ -538,45 +531,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     /// Keeps an open popover sized to its host rows when the selection switches
-    /// between one host and All Hosts. The detached window is the user's to size.
+    /// between one host and All Hosts.
     private func observeStatusHostRowCount() {
         hostRowCountObserver = statusPopoverViewModel.$presentation
             .map(\.hostRowCount)
             .removeDuplicates()
             .sink { [weak self] hostRowCount in
-                guard let self, let popover, popover.isShown, !popover.isDetached else { return }
-                popover.contentSize = statusContentSize(
-                    hostRowCount: hostRowCount,
-                    on: popover.contentViewController?.view.window?.screen
-                )
+                guard let self else { return }
+                statusPopover.resize { screen in
+                    self.statusContentSize(hostRowCount: hostRowCount, on: screen)
+                }
             }
     }
 
-    func popoverWillClose(_ notification: Notification) {
-        lastPopoverWillCloseUptime = ProcessInfo.processInfo.systemUptime
-    }
-
-    func popoverShouldDetach(_ popover: NSPopover) -> Bool {
-        MenuBarPresentationMode.shouldAllowUserDetachForMenuPopover()
-    }
-
-    func popoverDidDetach(_ popover: NSPopover) {
-        DebugLog.write("menu popover detached to window")
-        updatePowerMonitorUIVisibility()
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        updatePowerMonitorUIVisibility()
-    }
-
-    func detachableWindow(for popover: NSPopover) -> NSWindow? {
-        let window = makeDetachedStatusWindow()
-        detachedPopoverWindow = window
-        return window
-    }
-
     private func openWindowedStatusInterface() {
-        popover?.performClose(nil)
+        statusPopover.close()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let window = detachedPopoverWindow, window.isVisible {
@@ -644,12 +613,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
     }
 
-    private func updatePowerMonitorUIVisibility() {
-        let isVisible = overlayController?.window?.isVisible == true
-            || popover?.isShown == true
-            || detachedPopoverWindow?.isVisible == true
+    /// Windows that can hold keyboard focus; the overlay never becomes key.
+    private var hasVisiblePrimaryWindow: Bool {
+        detachedPopoverWindow?.isVisible == true
             || settingsWindowController?.window?.isVisible == true
             || historyWindowController?.window?.isVisible == true
+    }
+
+    private func updatePowerMonitorUIVisibility() {
+        let isVisible = overlayController?.window?.isVisible == true
+            || statusPopover.isShown
+            || hasVisiblePrimaryWindow
         powerMonitor?.setUIVisible(isVisible)
     }
 
