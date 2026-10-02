@@ -13,32 +13,42 @@ struct StatusPopoverView: View {
 
     var body: some View {
         let presentation = viewModel.presentation
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 13) {
-                header
+        // The content is stretched to at least the viewport, so the graph and
+        // the sample rows absorb whatever height the window has. The scroll
+        // view is only a fallback for when even their minimums do not fit, and
+        // it is the only scrollable region in the window.
+        GeometryReader { viewport in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 13) {
+                    header
 
-                switch presentation.displayMode {
-                case .signal:
-                    signalDisplay
-                case .ring:
-                    ringDisplay
-                    sparkline
-                        .frame(height: 58)
-                    rangePicker
-                }
+                    switch presentation.displayMode {
+                    case .signal:
+                        signalDisplay
+                    case .ring:
+                        ringDisplay
+                        sparkline
+                            .frame(minHeight: 58, idealHeight: 58, maxHeight: .infinity)
+                        rangePicker
+                    }
 
-                if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
-                    StarlinkTelemetrySummary(
-                        presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
-                    )
+                    if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
+                        StarlinkTelemetrySummary(
+                            presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
+                        )
+                    }
+                    if presentation.popoverShowsAllHosts {
+                        allHostStatusSummary
+                    }
+                    // Spare height goes to sample rows first; once every row is
+                    // showing, the graph takes the rest.
+                    RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
+                        .layoutPriority(1)
                 }
-                if presentation.popoverShowsAllHosts {
-                    allHostStatusSummary
-                }
-                RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
+                .padding(MenuBarPresentationMode.statusContentPadding)
+                .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .topLeading)
             }
-            .padding(MenuBarPresentationMode.statusContentPadding)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
@@ -219,7 +229,11 @@ struct StatusPopoverView: View {
             }
 
             signalGraphCard
-                .frame(height: 130)
+                .frame(
+                    minHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    idealHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    maxHeight: .infinity
+                )
 
             HStack(spacing: 0) {
                 compactStat("TX", "\(presentation.displayPresentation.primaryStats.transmitted)")

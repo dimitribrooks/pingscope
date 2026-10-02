@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Darwin
 import PingScopeCore
 import SwiftUI
@@ -66,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var powerMonitor: MacPowerActivityMonitor?
     private var cadenceUpdateTask: Task<Void, Never>?
     private var pendingCadenceInputs: CadenceInputs?
+    private var hostRowCountObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -87,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         model.onOverlayGraphClicked = { [weak self] in
             self?.openPopoverFromOverlay()
         }
+        observeStatusHostRowCount()
         if Self.launchesWindowed {
             DispatchQueue.main.async { [weak self] in
                 self?.openWindowedStatusInterface()
@@ -475,7 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func showPopover(relativeTo anchorView: NSView) {
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = MenuBarPresentationMode.statusContentSize
+        popover.contentSize = preferredStatusContentSize(on: anchorView.window?.screen)
         popover.contentViewController = makeStatusContentController()
         popover.delegate = self
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
@@ -486,6 +489,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             guard self?.popover === popover else { return }
             self?.applyWindowOpacity()
         }
+    }
+
+    /// Refreshes first: the view model is not kept current while hidden.
+    private func preferredStatusContentSize(on screen: NSScreen?) -> NSSize {
+        statusPopoverViewModel.refresh()
+        return statusContentSize(hostRowCount: statusPopoverViewModel.presentation.hostRowCount, on: screen)
+    }
+
+    private func statusContentSize(hostRowCount: Int, on screen: NSScreen?) -> NSSize {
+        let visibleHeight = (screen ?? NSScreen.main)?.visibleFrame.height ?? .greatestFiniteMagnitude
+        return MenuBarPresentationMode.statusContentSize(
+            hostRowCount: hostRowCount,
+            availableHeight: visibleHeight - MenuBarPresentationMode.statusContentScreenMargin
+        )
+    }
+
+    /// Keeps an open popover sized to its host rows when the selection switches
+    /// between one host and All Hosts. The detached window is the user's to size.
+    private func observeStatusHostRowCount() {
+        hostRowCountObserver = statusPopoverViewModel.$presentation
+            .map(\.hostRowCount)
+            .removeDuplicates()
+            .sink { [weak self] hostRowCount in
+                guard let self, let popover, popover.isShown, !popover.isDetached else { return }
+                popover.contentSize = statusContentSize(
+                    hostRowCount: hostRowCount,
+                    on: popover.contentViewController?.view.window?.screen
+                )
+            }
     }
 
     func popoverShouldDetach(_ popover: NSPopover) -> Bool {
@@ -524,8 +556,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func makeDetachedStatusWindow() -> NSWindow {
+        let contentSize = preferredStatusContentSize(on: NSScreen.main)
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: MenuBarPresentationMode.statusContentSize),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: MenuBarPresentationMode.detachedPopoverWindowStyleMask,
             backing: .buffered,
             defer: false
@@ -541,7 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         window.isReleasedWhenClosed = false
         window.delegate = self
         DispatchQueue.main.async { [weak window] in
-            window?.setContentSize(MenuBarPresentationMode.statusContentSize)
+            window?.setContentSize(contentSize)
         }
         return window
     }

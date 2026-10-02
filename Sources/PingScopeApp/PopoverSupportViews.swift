@@ -21,9 +21,11 @@ struct AllHostStatusRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             LatencySparkline(graphData: graphData, color: sparklineColor)
-                .frame(width: 58, height: 20)
+                .frame(minWidth: 58, maxWidth: 240)
+                .frame(height: 20)
                 .opacity(graphData.hasLatencyData ? 1 : 0.18)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(summary.latencyText)

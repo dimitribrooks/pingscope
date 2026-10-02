@@ -72,15 +72,63 @@ final class MenuBarPresentationModeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(MenuBarPresentationMode.statusGraphMinimumHeight, 150)
     }
 
-    func testRecentSamplesTableColumnsFitWithinStatusContentMinimumWidthWithoutHorizontalOverflow() {
-        // The status content view pads on each side; the table's column
-        // minimums must fit inside what remains at the window's declared
-        // minimum width, or the Table shows a permanent horizontal scrollbar
-        // whenever the window is narrowed toward that minimum.
-        let horizontalContentPadding = MenuBarPresentationMode.statusContentPadding * 2
-        let availableWidth = MenuBarPresentationMode.statusContentMinimumSize.width - horizontalContentPadding
+    func testRecentSamplesClaimOnlyWholeRows() {
+        let rowHeight = RecentSamplesLayout.rowHeight
 
-        XCTAssertLessThanOrEqual(RecentSamplesColumnLayout.totalMinimumWidth, availableWidth)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: rowHeight * 5, sampleCount: 8), 5)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: rowHeight * 5 + rowHeight - 1, sampleCount: 8), 5)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: rowHeight * 6, sampleCount: 8), 6)
+    }
+
+    func testRecentSamplesKeepMinimumFootprintWhenSpaceOrSamplesAreShort() {
+        let minimum = RecentSamplesLayout.minimumVisibleRows
+
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: 0, sampleCount: 8), minimum)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: 1_000, sampleCount: 0), minimum)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: 1_000, sampleCount: 1), minimum)
+    }
+
+    func testRecentSamplesNeverClaimMoreRowsThanSamples() {
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: 1_000, sampleCount: 8), 8)
+        XCTAssertEqual(RecentSamplesLayout.visibleRowCount(availableHeight: .infinity, sampleCount: 8), 8)
+    }
+
+    func testRecentSamplesIdealSizeIsTheMinimumSoTheScrollViewOnlyScrollsWhenItMust() {
+        // A scroll view sizes its content by ideal height. If the ideal were
+        // every row, the status content would scroll at sizes where showing
+        // fewer rows fits.
+        XCTAssertEqual(
+            RecentSamplesLayout.visibleRowCount(availableHeight: nil, sampleCount: 8),
+            RecentSamplesLayout.minimumVisibleRows
+        )
+    }
+
+    func testStatusContentOpensAtDefaultSizeUntilHostRowsOutgrowIt() {
+        for hostRowCount in 0...MenuBarPresentationMode.statusHostRowsFittingDefaultHeight {
+            XCTAssertEqual(
+                MenuBarPresentationMode.statusContentSize(hostRowCount: hostRowCount, availableHeight: 2_000),
+                MenuBarPresentationMode.statusContentSize
+            )
+        }
+    }
+
+    func testStatusContentGrowsByOneRowHeightPerExtraHost() {
+        let hostRowCount = MenuBarPresentationMode.statusHostRowsFittingDefaultHeight + 2
+        let size = MenuBarPresentationMode.statusContentSize(hostRowCount: hostRowCount, availableHeight: 2_000)
+
+        XCTAssertEqual(size.width, MenuBarPresentationMode.statusContentSize.width)
+        XCTAssertEqual(
+            size.height,
+            MenuBarPresentationMode.statusContentSize.height + 2 * MenuBarPresentationMode.statusHostRowHeight
+        )
+    }
+
+    func testStatusContentHeightStaysBetweenMinimumAndScreen() {
+        XCTAssertEqual(MenuBarPresentationMode.statusContentSize(hostRowCount: 40, availableHeight: 800).height, 800)
+        XCTAssertEqual(
+            MenuBarPresentationMode.statusContentSize(hostRowCount: 0, availableHeight: 100).height,
+            MenuBarPresentationMode.statusContentMinimumSize.height
+        )
     }
 
     func testPingIntervalOptionsIncludeReadableSlowerChoices() {
