@@ -116,18 +116,12 @@ struct StatusPopoverView: View {
 
     private var hostChip: some View {
         let presentation = viewModel.presentation
-        return Menu {
-            if presentation.snapshot.hosts.count > 1 {
-                Button("All Hosts") {
-                    viewModel.selectAllHosts()
-                }
-                Divider()
-            }
-            ForEach(presentation.snapshot.hosts) { host in
-                Button(host.displayName) {
-                    viewModel.selectHost(host.id)
-                }
-            }
+        return PopUpMenuButton {
+            StatusPopoverMenus.hosts(
+                viewModel.presentation.snapshot.hosts.map { (id: $0.id, name: $0.displayName) },
+                selectAllHosts: { viewModel.selectAllHosts() },
+                selectHost: { viewModel.selectHost($0) }
+            )
         } label: {
             HStack(spacing: 7) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -149,8 +143,8 @@ struct StatusPopoverView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.thinMaterial, in: Capsule())
+            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
     }
 
     private var monitoredHostsAccessibilitySummary: String {
@@ -163,45 +157,27 @@ struct StatusPopoverView: View {
             .joined(separator: ". ")
     }
 
-    @ViewBuilder
     private var settingsMenu: some View {
-        let presentation = viewModel.presentation
-        Menu {
-            Picker("Display style", selection: Binding(
-                get: { presentation.displayMode },
-                set: { viewModel.setDisplayMode($0) }
-            )) {
-                ForEach(PingScopeDisplayMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            Divider()
-            if !presentation.popoverShowsAllHosts, let host = presentation.primaryHost {
-                let selectedMilliseconds = PingIntervalPresentation.selection(for: host.interval)
-                Picker("Ping interval", selection: Binding(
-                    get: { selectedMilliseconds },
-                    set: { milliseconds in viewModel.setPingInterval(milliseconds, for: host.id) }
-                )) {
-                    ForEach(PingIntervalPresentation.options(including: selectedMilliseconds)) { option in
-                        Text(option.label).tag(option.milliseconds)
-                    }
-                }
-                Divider()
-            }
-            Button("Open History", action: onHistory)
-            Button("Open Settings", action: onSettings)
-            Divider()
-            Button("Quit PingScope") {
-                NSApp.terminate(nil)
-            }
+        PopUpMenuButton {
+            let presentation = viewModel.presentation
+            return StatusPopoverMenus.settings(
+                displayMode: presentation.displayMode,
+                intervalHost: presentation.popoverShowsAllHosts ? nil : presentation.primaryHost,
+                actions: .init(
+                    setDisplayMode: { viewModel.setDisplayMode($0) },
+                    setPingInterval: { viewModel.setPingInterval($0, for: $1) },
+                    openHistory: onHistory,
+                    openSettings: onSettings,
+                    quit: { NSApp.terminate(nil) }
+                )
+            )
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 30, height: 30)
                 .background(.thinMaterial, in: Circle())
+                .contentShape(Circle())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
         .help("Settings")
         .accessibilityLabel("Settings")
     }
