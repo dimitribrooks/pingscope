@@ -15,6 +15,9 @@ enum MenuBarPresentationMode {
     /// Screen height left clear of the status content for the popover arrow or
     /// the detached window's title bar.
     static let statusContentScreenMargin: CGFloat = 40
+    /// A click on the status item while the transient popover is open both
+    /// dismisses the popover (as an outside click) and reaches the toggle.
+    static let popoverReopenSuppressionInterval: TimeInterval = 0.25
 
     static let detachedPopoverWindowStyleMask: NSWindow.StyleMask = [
         .titled,
@@ -32,6 +35,17 @@ enum MenuBarPresentationMode {
             width: statusContentSize.width,
             height: max(statusContentMinimumSize.height, min(preferredHeight, availableHeight))
         )
+    }
+
+    static func shouldSuppressPopoverReopen(now: TimeInterval, lastWillClose: TimeInterval?) -> Bool {
+        guard let lastWillClose else { return false }
+        return now - lastWillClose < popoverReopenSuppressionInterval
+    }
+
+    /// Control-click is the left button, so it arrives through the status
+    /// button's action rather than the right-click gesture.
+    static func isControlClick(type: NSEvent.EventType?, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        type == .leftMouseDown && modifierFlags.contains(.control)
     }
 
     static func shouldAllowUserDetachForMenuPopover() -> Bool {

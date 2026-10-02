@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var cadenceUpdateTask: Task<Void, Never>?
     private var pendingCadenceInputs: CadenceInputs?
     private var isPresentationRefreshDeferred = false
+    private var lastPopoverWillCloseUptime: TimeInterval?
     private var hostRowCountObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -402,20 +403,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // label + identifier so it can be found and opened programmatically.
         button.setAccessibilityLabel("PingScope")
         button.setAccessibilityIdentifier("pingscope.statusItem")
-        // Wire the button's accessibility action to the popover toggle. Real
-        // mouse clicks are handled by MenuBarStatusView below; this makes the
-        // item respond to an AXPress (how automation and assistive tech open
-        // it) instead of routing solely through raw mouse events.
+        // Clicks and AXPress (how automation and assistive tech open the item)
+        // all go through the button's own action. MenuBarStatusView only draws
+        // and opts out of hit testing: when it handled mouseDown itself while
+        // the button kept this action, one click had two routes to the toggle.
         button.target = self
         button.action = #selector(togglePopover)
+        button.sendAction(on: .leftMouseDown)
+        // The button never sends its action for the right mouse button.
+        let secondaryClick = NSClickGestureRecognizer(target: self, action: #selector(showContextMenuFromStatusItem))
+        secondaryClick.buttonMask = 0x2
+        button.addGestureRecognizer(secondaryClick)
         let view = MenuBarStatusView(frame: NSRect(x: 0, y: 0, width: defaultContent.itemWidth, height: NSStatusBar.system.thickness))
         view.autoresizingMask = [.width, .height]
         view.onPrimaryClick = { [weak self] in
             self?.togglePopover()
-        }
-        view.onSecondaryClick = { [weak self, weak view] in
-            guard let view else { return }
-            self?.showContextMenu(from: view)
         }
         button.addSubview(view)
         statusItemView = view
@@ -437,16 +439,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard let anchorView = statusItemView else { return }
 
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp {
+        if MenuBarPresentationMode.isControlClick(type: event?.type, modifierFlags: event?.modifierFlags ?? []) {
             showContextMenu(from: anchorView)
             return
         }
 
-        if popover?.isShown == true {
-            popover?.performClose(nil)
+        if let popover, popover.isShown {
+            // A popover left behind on another Space still reports isShown;
+            // closing it would look like a swallowed click, so bring it here.
+            let isOnActiveSpace = popover.contentViewController?.view.window?.isOnActiveSpace ?? true
+            DebugLog.write("status item click closes popover onActiveSpace=\(isOnActiveSpace)")
+            popover.performClose(nil)
+            if isOnActiveSpace { return }
+        } else if MenuBarPresentationMode.shouldSuppressPopoverReopen(
+            now: ProcessInfo.processInfo.systemUptime,
+            lastWillClose: lastPopoverWillCloseUptime
+        ) {
+            DebugLog.write("status item click already dismissed the popover")
             return
         }
 
+        DebugLog.write("status item click opens popover")
         showPopoverFromStatusItem()
     }
 
@@ -537,6 +550,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     on: popover.contentViewController?.view.window?.screen
                 )
             }
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        lastPopoverWillCloseUptime = ProcessInfo.processInfo.systemUptime
     }
 
     func popoverShouldDetach(_ popover: NSPopover) -> Bool {
@@ -634,6 +651,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             || settingsWindowController?.window?.isVisible == true
             || historyWindowController?.window?.isVisible == true
         powerMonitor?.setUIVisible(isVisible)
+    }
+
+    @objc private func showContextMenuFromStatusItem() {
+        guard let anchorView = statusItemView else { return }
+        showContextMenu(from: anchorView)
     }
 
     private func showContextMenu(from view: NSView) {
@@ -757,7 +779,6 @@ final class MenuBarStatusView: NSView {
     private var cachedLatencyText: NSAttributedString
 
     var onPrimaryClick: (() -> Void)?
-    var onSecondaryClick: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         cachedLatencyText = Self.makeLatencyText(for: content)
@@ -805,12 +826,8 @@ final class MenuBarStatusView: NSView {
         )
     }
 
-    override func mouseDown(with event: NSEvent) {
-        onPrimaryClick?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        onSecondaryClick?()
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 
     override func accessibilityPerformPress() -> Bool {

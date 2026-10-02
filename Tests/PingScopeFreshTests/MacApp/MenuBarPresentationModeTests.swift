@@ -131,6 +131,29 @@ final class MenuBarPresentationModeTests: XCTestCase {
         )
     }
 
+    func testClickThatDismissedThePopoverDoesNotReopenIt() {
+        let interval = MenuBarPresentationMode.popoverReopenSuppressionInterval
+
+        XCTAssertTrue(MenuBarPresentationMode.shouldSuppressPopoverReopen(now: 100, lastWillClose: 100))
+        XCTAssertTrue(MenuBarPresentationMode.shouldSuppressPopoverReopen(now: 100 + interval / 2, lastWillClose: 100))
+        XCTAssertFalse(MenuBarPresentationMode.shouldSuppressPopoverReopen(now: 100 + interval, lastWillClose: 100))
+        XCTAssertFalse(MenuBarPresentationMode.shouldSuppressPopoverReopen(now: 100, lastWillClose: nil))
+    }
+
+    func testControlClickOnStatusItemIsSecondaryClick() {
+        XCTAssertTrue(MenuBarPresentationMode.isControlClick(type: .leftMouseDown, modifierFlags: [.control]))
+        XCTAssertFalse(MenuBarPresentationMode.isControlClick(type: .leftMouseDown, modifierFlags: []))
+        XCTAssertFalse(MenuBarPresentationMode.isControlClick(type: .leftMouseDown, modifierFlags: [.command]))
+        XCTAssertFalse(MenuBarPresentationMode.isControlClick(type: nil, modifierFlags: [.control]))
+    }
+
+    @MainActor
+    func testStatusItemGlyphLeavesClicksToTheStatusBarButton() {
+        let view = MenuBarStatusView(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
+
+        XCTAssertNil(view.hitTest(NSPoint(x: 17, y: 11)))
+    }
+
     func testPingIntervalOptionsIncludeReadableSlowerChoices() {
         XCTAssertEqual(PingIntervalPresentation.options.map(\.label), ["1s", "2s", "5s", "10s", "30s"])
         XCTAssertEqual(PingIntervalPresentation.options.map(\.milliseconds), [1_000, 2_000, 5_000, 10_000, 30_000])
