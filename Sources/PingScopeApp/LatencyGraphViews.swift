@@ -287,33 +287,40 @@ struct MultiHostLatencyGraph: View {
     }
 
     var body: some View {
-        HStack(spacing: showsAxes ? 6 : 0) {
-            if showsAxes {
-                LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
-            }
-
-            ZStack(alignment: .bottomLeading) {
-                graphCanvas(graphData: graphData)
-
-                if graphData.isEmpty {
-                    Text("No samples in range")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The legend gets a row of its own under the plot. Healthy latency lines
+        // hug the bottom of the plot, so a legend laid over it hides exactly the
+        // part of the graph that is in use.
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: axisSpacing) {
+                if showsAxes {
+                    LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
                 }
 
-                if showsLegend {
-                    legend
-                        .padding(8)
+                ZStack {
+                    graphCanvas(graphData: graphData)
+
+                    if graphData.isEmpty {
+                        Text("No samples in range")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("All hosts latency graph")
+
+                if showsAxes {
+                    LatencyGraphRightTicks(scale: graphData.scale)
                 }
             }
 
-            if showsAxes {
-                LatencyGraphRightTicks(scale: graphData.scale)
+            if showsLegend {
+                legend
+                    .padding(.leading, showsAxes ? LatencyGraphAxisLabels.width + axisSpacing : 0)
             }
         }
-        .accessibilityLabel("All hosts latency graph")
     }
+
+    private var axisSpacing: CGFloat { showsAxes ? 6 : 0 }
 
     private var legend: some View {
         HStack(spacing: 8) {
@@ -329,9 +336,6 @@ struct MultiHostLatencyGraph: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func graphCanvas(graphData: MultiHostLatencyGraphData) -> some View {
@@ -390,6 +394,8 @@ struct MultiHostLatencyGraph: View {
 }
 
 private struct LatencyGraphAxisLabels: View {
+    static let width: CGFloat = 34
+
     let scale: LatencyGraphScale
     let hasData: Bool
 
@@ -406,7 +412,7 @@ private struct LatencyGraphAxisLabels: View {
         .font(.system(size: 9, weight: .regular, design: .monospaced))
         .monospacedDigit()
         .foregroundStyle(.secondary)
-        .frame(width: 34)
+        .frame(width: Self.width)
     }
 }
 
