@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var powerMonitor: MacPowerActivityMonitor?
     private var cadenceUpdateTask: Task<Void, Never>?
     private var pendingCadenceInputs: CadenceInputs?
+    private var isPresentationRefreshDeferred = false
     private var hostRowCountObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -182,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func showOverlay() {
         DebugLog.write("AppDelegate.showOverlay called overlayControllerNil=\(overlayController == nil)")
         if overlayController == nil {
-            let view = OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay)
+            let view = OverlayView(viewModel: overlayViewModel)
             let window = OverlayWindow(contentRect: model.overlayFrame)
             window.contentView = OverlayContainerView(
                 rootView: view,
@@ -330,7 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func refreshOverlayContent() {
         overlayController?.window?.contentView = OverlayContainerView(
-            rootView: OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay),
+            rootView: OverlayView(viewModel: overlayViewModel),
             isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
             hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
             onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
@@ -357,11 +358,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func refreshPresentationViewModels() {
+        // Probe results keep arriving on the main queue while a menu is open,
+        // and re-rendering a SwiftUI Menu replaces the items of its open NSMenu
+        // under the pointer (a highlighted submenu blinks on every result). Hold
+        // tick-driven refreshes until the run loop leaves event tracking.
+        guard RunLoop.main.currentMode != .eventTracking else {
+            deferPresentationRefreshUntilTrackingEnds()
+            return
+        }
         if overlayController?.window?.isVisible == true {
             overlayViewModel.refresh()
         }
         if popover?.isShown == true || detachedPopoverWindow?.isVisible == true {
             statusPopoverViewModel.refresh()
+        }
+    }
+
+    private func deferPresentationRefreshUntilTrackingEnds() {
+        guard !isPresentationRefreshDeferred else { return }
+        isPresentationRefreshDeferred = true
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.isPresentationRefreshDeferred = false
+                self?.refreshPresentationViewModels()
+            }
         }
     }
 
@@ -441,7 +461,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let controller = NSHostingController(
             rootView: StatusPopoverView(
                 viewModel: statusPopoverViewModel,
-                liveDisplay: model.liveDisplay,
                 onHistory: { [weak self] in
                     self?.openHistoryFromStatusContent()
                 },

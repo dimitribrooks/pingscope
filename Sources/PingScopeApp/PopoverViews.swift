@@ -4,7 +4,6 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverPresentationViewModel
-    @ObservedObject var liveDisplay: LiveDisplayModel
     var onHistory: () -> Void = {}
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
